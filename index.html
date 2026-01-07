@@ -479,8 +479,8 @@
                     if (tspan.node().getComputedTextLength() > width) {
                         line.pop(); 
                         
-                        // If we are already on the 3rd line (lineNumber == 2), stop adding new lines
-                        if (lineNumber >= 2) {
+                        // If we are already on the 2nd line (lineNumber == 1), stop adding new lines
+                        if (lineNumber >= 1) {
                             tspan.text(line.join(" ") + "...");
                             break; // Stop processing words
                         }
