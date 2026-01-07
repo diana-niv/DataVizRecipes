@@ -16,14 +16,32 @@
         h3 { margin-top: 0; border-bottom: 2px solid #f4f4f9; padding-bottom: 10px; }
         p { color: #666; font-size: 14px; }
 
-        .dashboard-grid { 
+        .dashboard-section {
+            max-width: 1200px;
+            margin: 0 auto 50px auto;
+        }
+
+        .dashboard-title {
+            color: #2c3e50;
+            border-left: 5px solid #3498db;
+            padding-left: 15px;
+            margin: 40px 0 20px 0;
+        }
+
+        /* Dashboard 1: Single large view */
+        .grid-dashboard-1 { 
+            display: grid; 
+            grid-template-columns: 1fr; 
+            grid-template-rows: 600px; 
+            gap: 20px; 
+        }
+
+        /* Dashboard 2: Split view + Timeline */
+        .grid-dashboard-2 { 
             display: grid; 
             grid-template-columns: 2fr 1fr; 
-            grid-template-rows: 500px 500px auto; 
+            grid-template-rows: 500px auto; 
             gap: 20px; 
-            max-width: 1200px;
-            margin: 0 auto;
-            padding-bottom: 50px;
         }
         
         .full-width { grid-column: span 2; }
@@ -121,50 +139,53 @@
 
     <h1>Recipe Exploration: Breakfast & Brunch Recipes</h1>
     
-    <div class="dashboard-grid">
-        
-        <div class="card full-width">
-            <div class="card-header">
-                <h3>Ingredient Pairing Network</h3>
-                <label class="toggle-container">
-                    <input type="checkbox" id="icon-toggle" checked> Show Icons
-                </label>
-            </div>
-            <div id="network-viz">
-                <div class="chart-subtitle">Click a Node to focus. <strong>Click background</strong> to reset. Hover edges for details.</div>
-            </div>
-        </div>
-
-        <div class="card">
-            <h3>Category Overview</h3>
-            <div id="euler-viz">
-                <div class="chart-subtitle">Click a circle to filter recipes.</div>
+    <!-- Dashboard 1 Section -->
+    <div class="dashboard-section">
+        <h2 class="dashboard-title">Dashboard 1: Ingredient Pairing Network</h2>
+        <div class="grid-dashboard-1">
+            <div class="card">
+                <div class="card-header">
+                    <h3>Ingredient Pairing Network</h3>
+                    <label class="toggle-container">
+                        <input type="checkbox" id="icon-toggle" checked> Show Icons
+                    </label>
+                </div>
+                <div id="network-viz">
+                    <div class="chart-subtitle">Click a Node to focus. <strong>Click background</strong> to reset. Hover edges for details.</div>
+                </div>
             </div>
         </div>
+    </div>
 
-        <div class="card">
-            <h3 id="list-title">All Recipes</h3>
-            <p>Select a recipe to see its timeline below.</p>
-            <div id="recipe-list-container">
-                <p style="padding:10px">Loading data...</p>
+    <!-- Dashboard 2 Section -->
+    <div class="dashboard-section">
+        <h2 class="dashboard-title">Dashboard 2: Recipe Analysis & Timeline</h2>
+        <div class="grid-dashboard-2">
+            
+            <div class="card">
+                <h3>Category Overview</h3>
+                <div id="euler-viz">
+                    <div class="chart-subtitle">Click a circle to filter recipes.</div>
+                </div>
             </div>
-        </div>
 
-        <div class="card full-width" id="gantt-section">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-                <h3 id="gantt-title" style="border:none; margin:0;">Recipe Timeline</h3>
-                <button onclick="hideGantt()" style="cursor:pointer; background:none; border:none; color:#999; font-size:20px;">&times;</button>
+            <div class="card">
+                <h3 id="list-title">All Recipes</h3>
+                <p>Select a recipe to see its timeline below.</p>
+                <div id="recipe-list-container">
+                    <p style="padding:10px">Loading data...</p>
+                </div>
             </div>
-            <div id="gantt-viz"></div>
-            <!-- Subtitle is appended dynamically or we can just place it here if we don't clear the whole div. 
-                 However, drawGanttChart calls container.html("") which clears everything.
-                 So I need to move this text into the JS function OR structure it so the JS doesn't wipe it.
-                 Better to restructure: Make #gantt-viz hold the SVG, and put the subtitle *after* it or inside a wrapper. 
-                 But to be "bottom left corner of the graph", inside is best.
-                 I will update the drawGanttChart function to append this subtitle after clearing.
-            -->
-        </div>
 
+            <div class="card full-width" id="gantt-section">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <h3 id="gantt-title" style="border:none; margin:0;">Recipe Timeline</h3>
+                    <button onclick="hideGantt()" style="cursor:pointer; background:none; border:none; color:#999; font-size:20px;">&times;</button>
+                </div>
+                <div id="gantt-viz"></div>
+            </div>
+            
+        </div>
     </div>
 
     <div id="tooltip" class="tooltip"></div>
