@@ -379,9 +379,18 @@
             const zoom = d3.zoom().scaleExtent([1, 5]).translateExtent([[0, 0], [width, height]]).extent([[0, 0], [width, height]])
                 .on("zoom", (event) => { updateChart(event.transform.rescaleX(xScale)); });
 
+            // Add clipPath to prevent overflow
+            svg.append("defs").append("clipPath")
+                .attr("id", "gantt-clip")
+                .append("rect")
+                .attr("x", margin.left)
+                .attr("y", margin.top)
+                .attr("width", width - margin.left - margin.right)
+                .attr("height", height - margin.top - margin.bottom);
+
             svg.append("rect").attr("width", width).attr("height", height).style("fill", "none").style("pointer-events", "all").call(zoom);
 
-            const contentGroup = svg.append("g");
+            const contentGroup = svg.append("g").attr("clip-path", "url(#gantt-clip)");
             updateChart(xScale);
 
             function updateChart(currentXScale) {
@@ -398,9 +407,18 @@
                 bars.exit().remove();
                 
                 const labels = contentGroup.selectAll(".gantt-label").data(recipe.timeline);
-                labels.enter().append("text").attr("class", "gantt-label").attr("dy", "0.35em").merge(labels)
-                    .attr("x", d => currentXScale(d.start_time) + 5).attr("y", d => yScale(`Step ${d.step_number}`) + yScale.bandwidth() / 2)
-                    .text(d => { const w = currentXScale(d.start_time + d.duration) - currentXScale(d.start_time); return w > 50 ? (d.task_text.length > 20 ? d.task_text.substring(0, 20)+"..." : d.task_text) : ""; });
+                labels.enter().append("text").attr("class", "gantt-label").merge(labels)
+                    .attr("x", d => currentXScale(d.start_time) + 5)
+                    .attr("y", d => yScale(`Step ${d.step_number}`) + yScale.bandwidth() / 2)
+                    .each(function(d) {
+                        const el = d3.select(this);
+                        const w = currentXScale(d.start_time + d.duration) - currentXScale(d.start_time);
+                        if (w > 60) {
+                            el.text(d.task_text).call(wrap, w - 10);
+                        } else {
+                            el.text("");
+                        }
+                    });
                 labels.exit().remove();
             }
         }
@@ -413,16 +431,27 @@
         // --- UTILS ---
         function wrap(textSelection, width) {
             textSelection.each(function() {
-                let text = d3.select(this), words = text.text().split(/\s+/).reverse(), word, line = [], lineNumber = 0, lineHeight = 1.1, y = text.attr("y"), dy = 0, tspan = text.text(null).append("tspan").attr("x", 0).attr("y", y).attr("dy", dy + "em");
+                let text = d3.select(this), words = text.text().split(/\s+/).reverse(), word, line = [], lineNumber = 0, lineHeight = 1.1, y = text.attr("y"), x = text.attr("x") || 0, dy = 0, tspan = text.text(null).append("tspan").attr("x", x).attr("y", y).attr("dy", dy + "em");
                 while (word = words.pop()) {
                     line.push(word); tspan.text(line.join(" "));
                     if (tspan.node().getComputedTextLength() > width) {
-                        line.pop(); tspan.text(line.join(" ")); line = [word];
-                        tspan = text.append("tspan").attr("x", 0).attr("y", y).attr("dy", ++lineNumber * lineHeight + dy + "em").text(word);
+                        line.pop(); 
+                        
+                        // If we are already on the 3rd line (lineNumber == 2), stop adding new lines
+                        if (lineNumber >= 2) {
+                            tspan.text(line.join(" ") + "...");
+                            break; // Stop processing words
+                        }
+
+                        tspan.text(line.join(" ")); line = [word];
+                        tspan = text.append("tspan").attr("x", x).attr("y", y).attr("dy", ++lineNumber * lineHeight + dy + "em").text(word);
                     }
                 }
                 if (lineNumber > 0) text.style("transform", `translateY(-${(lineNumber * lineHeight) / 2}em)`);
-                else text.select("tspan").attr("dy", "0.3em");
+                else {
+                    text.style("transform", null);
+                    text.select("tspan").attr("dy", "0.3em");
+                }
             });
         }
         function processNetworkData(recipes) {
