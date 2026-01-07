@@ -349,8 +349,31 @@
             items.append("p").attr("class", "recipe-meta").text(d => `🕒 ${d.total_time} mins • ${d.ingredients.length} ingredients`);
         }
 
+        // --- FISHEYE PLUGIN IMPLEMENTATION ---
+        function d3FisheyeScale(scale) {
+            let d = 3, center = 0;
+            function fisheye(_) {
+                let x = scale(_),
+                    left = x < center,
+                    v, range = scale.range(),
+                    min = range[0], max = range[1],
+                    m = left ? center - min : max - center;
+                if (m == 0) m = max - min;
+                return (left ? -1 : 1) * m * (d + 1) / (d + (m / Math.abs(x - center))) + center;
+            }
+            fisheye.invert = scale.invert;
+            fisheye.domain = function(_) { if (!arguments.length) return scale.domain(); scale.domain(_); return fisheye; };
+            fisheye.range = function(_) { if (!arguments.length) return scale.range(); scale.range(_); return fisheye; };
+            fisheye.distortion = function(_) { if (!arguments.length) return d; d = +_; return fisheye; };
+            fisheye.focus = function(_) { if (!arguments.length) return center; center = +_; return fisheye; };
+            fisheye.copy = function() { return d3FisheyeScale(scale.copy()).distortion(d).focus(center); };
+            fisheye.ticks = scale.ticks;
+            fisheye.tickFormat = scale.tickFormat;
+            return fisheye;
+        }
+
         // ==========================================
-        // 4. GANTT CHART
+        // 4. GANTT CHART (FISHEYE + MULTI-ROW)
         // ==========================================
         function drawGanttChart(recipe) {
             const section = document.getElementById("gantt-section");
@@ -369,15 +392,18 @@
             const margin = { top: 30, right: 30, bottom: 40, left: 100 };
 
             const svg = container.append("svg").attr("width", width).attr("height", height);
+            
+            // Standard Multi-Row Y Scale
             const yScale = d3.scaleBand().domain(recipe.timeline.map(d => `Step ${d.step_number}`)).range([margin.top, height - margin.bottom]).padding(0.3);
+            
             const maxTime = recipe.total_time > 0 ? recipe.total_time : 60;
-            const xScale = d3.scaleLinear().domain([0, maxTime]).range([margin.left, width - margin.right]);
+            const linearX = d3.scaleLinear().domain([0, maxTime]).range([margin.left, width - margin.right]);
+            
+            // Initialize Fisheye Scale
+            const xFisheye = d3FisheyeScale(linearX).distortion(3).focus(width / 2); // distortion 3 is milder
 
             const xAxisGroup = svg.append("g").attr("transform", `translate(0, ${height - margin.bottom})`);
             const yAxisGroup = svg.append("g").attr("transform", `translate(${margin.left}, 0)`);
-
-            const zoom = d3.zoom().scaleExtent([1, 5]).translateExtent([[0, 0], [width, height]]).extent([[0, 0], [width, height]])
-                .on("zoom", (event) => { updateChart(event.transform.rescaleX(xScale)); });
 
             // Add clipPath to prevent overflow
             svg.append("defs").append("clipPath")
@@ -388,35 +414,51 @@
                 .attr("width", width - margin.left - margin.right)
                 .attr("height", height - margin.top - margin.bottom);
 
-            svg.append("rect").attr("width", width).attr("height", height).style("fill", "none").style("pointer-events", "all").call(zoom);
+            // Transparent rect for mouse events
+            svg.append("rect")
+                .attr("class", "background")
+                .attr("width", width)
+                .attr("height", height)
+                .style("fill", "transparent")
+                .on("mousemove", function(event) {
+                    const mouseX = d3.pointer(event)[0];
+                    xFisheye.focus(mouseX);
+                    updateChart();
+                });
 
             const contentGroup = svg.append("g").attr("clip-path", "url(#gantt-clip)");
-            updateChart(xScale);
+            
+            // Initial render
+            updateChart();
 
-            function updateChart(currentXScale) {
-                xAxisGroup.call(d3.axisBottom(currentXScale).ticks(10).tickFormat(d => d + "m"));
+            function updateChart() {
+                xAxisGroup.call(d3.axisBottom(xFisheye).ticks(10).tickFormat(d => d + "m"));
                 yAxisGroup.call(d3.axisLeft(yScale));
+
                 const bars = contentGroup.selectAll(".bar").data(recipe.timeline);
                 bars.enter().append("rect").attr("class", "bar").attr("rx", 4)
                     .attr("fill", d => d.type === 'active' ? "#ff9f43" : "#54a0ff")
-                    .merge(bars).attr("y", d => yScale(`Step ${d.step_number}`)).attr("height", yScale.bandwidth())
-                    .attr("x", d => currentXScale(d.start_time))
-                    .attr("width", d => Math.max(2, currentXScale(d.start_time + d.duration) - currentXScale(d.start_time)))
+                    .merge(bars)
+                    .attr("y", d => yScale(`Step ${d.step_number}`))
+                    .attr("height", yScale.bandwidth())
+                    .attr("x", d => xFisheye(d.start_time))
+                    .attr("width", d => Math.max(2, xFisheye(d.start_time + d.duration) - xFisheye(d.start_time)))
                     .on("mouseover", (event, d) => showTooltip(event, `<strong>Step ${d.step_number}</strong> (${d.duration} min)<br>${d.task_text}`))
                     .on("mouseout", hideTooltip);
                 bars.exit().remove();
                 
                 const labels = contentGroup.selectAll(".gantt-label").data(recipe.timeline);
                 labels.enter().append("text").attr("class", "gantt-label").merge(labels)
-                    .attr("x", d => currentXScale(d.start_time) + 5)
+                    .attr("x", d => xFisheye(d.start_time) + 5)
                     .attr("y", d => yScale(`Step ${d.step_number}`) + yScale.bandwidth() / 2)
                     .each(function(d) {
                         const el = d3.select(this);
-                        const w = currentXScale(d.start_time + d.duration) - currentXScale(d.start_time);
+                        const w = xFisheye(d.start_time + d.duration) - xFisheye(d.start_time);
                         if (w > 60) {
                             el.text(d.task_text).call(wrap, w - 10);
+                            el.style("opacity", 1);
                         } else {
-                            el.text("");
+                            el.text(""); // Clear text if too narrow
                         }
                     });
                 labels.exit().remove();
