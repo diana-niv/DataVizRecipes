@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Smart Cook Dashboard</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            background-color: #f4f4f9; 
+            margin: 0; padding: 20px; 
+            box-sizing: border-box;
+        }
+        
+        h1 { margin-top: 0; color: #333; }
+        h3 { margin-top: 0; border-bottom: 2px solid #f4f4f9; padding-bottom: 10px; }
+        p { color: #666; font-size: 14px; }
+
+        .dashboard-grid { 
+            display: grid; 
+            grid-template-columns: 2fr 1fr; 
+            grid-template-rows: 500px 500px auto; 
+            gap: 20px; 
+            max-width: 1200px;
+            margin: 0 auto;
+            padding-bottom: 50px;
+        }
+        
+        .full-width { grid-column: span 2; }
+
+        .card { 
+            background: white; 
+            border-radius: 12px; 
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08); 
+            padding: 20px; 
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+
+        /* HEADER WITH CONTROLS */
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid #f4f4f9;
+            margin-bottom: 10px;
+            padding-bottom: 5px;
+        }
+        .card-header h3 { border: none; padding: 0; margin: 0; }
+
+        /* TOGGLE SWITCH STYLE */
+        .toggle-container {
+            display: flex; align-items: center; font-size: 13px; color: #666; cursor: pointer;
+        }
+        .toggle-container input { margin-right: 6px; cursor: pointer; }
+
+        /* --- VISUALIZATION STYLES --- */
+        #euler-viz, #network-viz { flex-grow: 1; width: 100%; height: 100%; cursor: move; }
+        #recipe-list-container { overflow-y: auto; flex-grow: 1; margin-top: 10px; }
+        
+        /* GANTT SECTION */
+        #gantt-section { display: none; height: 400px; }
+        #gantt-viz { flex-grow: 1; width: 100%; background: #fafafa; border-radius: 8px; position: relative; }
+        
+        .bubble { cursor: pointer; transition: all 0.3s ease; }
+        .bubble:hover { stroke: #333; stroke-width: 2px; opacity: 0.9; }
+        .bubble-label { pointer-events: none; text-anchor: middle; fill: white; text-shadow: 0 1px 3px rgba(0,0,0,0.8); font-weight: 600; }
+
+        .recipe-item { padding: 10px; border-bottom: 1px solid #f0f0f0; cursor: pointer; transition: background 0.2s; }
+        .recipe-item:hover { background-color: #eef2f5; }
+        .recipe-item.selected { background-color: #e0e7ff; border-left: 4px solid #54a0ff; }
+        .recipe-title { font-weight: bold; color: #333; margin: 0; }
+        .recipe-meta { font-size: 12px; color: #888; margin: 4px 0 0 0; }
+
+        .node circle { stroke: #fff; stroke-width: 2px; cursor: pointer; transition: fill 0.2s; }
+        .node:hover circle { stroke: #333; }
+        
+        .node-label { 
+            font-size: 11px; font-weight: 600; pointer-events: none; text-anchor: middle; 
+            fill: #333; text-shadow: 0 2px 4px rgba(255,255,255,1);
+        }
+        
+        /* Node Icon (Emoji) - Controlled by Toggle */
+        .node-icon { 
+            pointer-events: none; text-anchor: middle; dominant-baseline: central;
+            transition: opacity 0.3s ease; /* Smooth toggle fade */
+        }
+        
+        .link { transition: stroke-opacity 0.2s; stroke-linecap: round; cursor: pointer; }
+
+        .bar { cursor: pointer; stroke: #fff; stroke-width: 1px; }
+        .bar:hover { opacity: 0.8; stroke: #333; }
+        .axis text { font-size: 12px; color: #666; }
+        .gantt-label { font-size: 11px; fill: #333; pointer-events: none; alignment-baseline: middle; }
+
+        .tooltip {
+            position: absolute; text-align: center; padding: 8px 12px;
+            font-size: 12px; background: rgba(0,0,0,0.9); color: #fff;
+            border-radius: 4px; pointer-events: none; opacity: 0; z-index: 200; box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+        }
+    </style>
+</head>
+<body>
+
+    <h1>🍳 Smart Cook: Breakfast & Brunch Discovery</h1>
+    
+    <div class="dashboard-grid">
+        
+        <div class="card full-width">
+            <div class="card-header">
+                <h3>1. Ingredient Pairing Network</h3>
+                <label class="toggle-container">
+                    <input type="checkbox" id="icon-toggle" checked> Show Icons (Isotypes)
+                </label>
+            </div>
+            <p><strong>Click a Node</strong> to focus. <strong>Click background</strong> to reset. Hover edges for details.</p>
+            <div id="network-viz"></div>
+        </div>
+
+        <div class="card">
+            <h3>2. Category Overview</h3>
+            <p>Click a circle to filter recipes. Scroll to Zoom.</p>
+            <div id="euler-viz"></div>
+        </div>
+
+        <div class="card">
+            <h3 id="list-title">3. All Recipes</h3>
+            <p>Select a recipe to see its timeline below.</p>
+            <div id="recipe-list-container">
+                <p style="padding:10px">Loading data...</p>
+            </div>
+        </div>
+
+        <div class="card full-width" id="gantt-section">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <h3 id="gantt-title" style="border:none; margin:0;">4. Recipe Timeline</h3>
+                <button onclick="hideGantt()" style="cursor:pointer; background:none; border:none; color:#999; font-size:20px;">&times;</button>
+            </div>
+            <p style="margin-top:5px; border-bottom: 2px solid #f4f4f9; padding-bottom: 10px;">
+                Scroll inside chart to Zoom/Expand time. <span style="color:#ff9f43">■ Active Prep</span> <span style="color:#54a0ff">■ Passive Cooking</span>
+            </p>
+            <div id="gantt-viz"></div>
+        </div>
+
+    </div>
+
+    <div id="tooltip" class="tooltip"></div>
+
+    <script>
+        const bubbleColor = d3.scaleOrdinal(d3.schemeSet3);
+        const networkColor = d3.scaleOrdinal(d3.schemeCategory10);
+        const tooltip = d3.select("#tooltip");
+        
+        let currentFocusNode = null;
+        let selectedCategory = null;
+        let showIcons = true; // State for icon toggle
+
+        // --- ICON MAPPER ---
+        const ingredientIcons = {
+            'egg': '🥚', 'milk': '🥛', 'cream': '🥛', 'butter': '🧈', 'cheese': '🧀',
+            'flour': '🌾', 'wheat': '🌾', 'oats': '🥣', 'bread': '🍞', 'toast': '🍞',
+            'bacon': '🥓', 'sausage': '🌭', 'ham': '🍖', 'meat': '🥩',
+            'salt': '🧂', 'sugar': '🍬', 'honey': '🍯', 'syrup': '🍁',
+            'oil': '🛢️', 'olive': '🫒', 'pepper': '🌶️', 'onion': '🧅', 'garlic': '🧄',
+            'potato': '🥔', 'tomato': '🍅', 'mushroom': '🍄', 'spinach': '🍃',
+            'fruit': '🍎', 'apple': '🍎', 'banana': '🍌', 'berry': '🍓', 'lemon': '🍋',
+            'chocolate': '🍫', 'vanilla': '🌼', 'cinnamon': '🍂', 'coffee': '☕', 'tea': '🫖'
+        };
+
+        function getIcon(name) {
+            const lowerName = name.toLowerCase();
+            for (const key in ingredientIcons) {
+                if (lowerName.includes(key)) return ingredientIcons[key];
+            }
+            return null;
+        }
+
+        // --- LISTENERS ---
+        // Add listener for the toggle switch
+        d3.select("#icon-toggle").on("change", function() {
+            showIcons = this.checked;
+            // Update visibility immediately
+            d3.selectAll(".node-icon").style("opacity", showIcons ? 1 : 0);
+        });
+
+        d3.json("parsed_data.json").then(data => {
+            console.log("Data loaded:", data);
+            drawBubbleChart(data);
+            drawNetworkGraph(data);
+            updateList(data, "All Recipes");
+        }).catch(err => {
+            console.error(err);
+            document.body.innerHTML = `<h2 style="color:red; padding:20px">Error: ${err.message}<br>Is your Python server running?</h2>`;
+        });
+
+        // ==========================================
+        // 1. NETWORK GRAPH (WITH TOGGLE SUPPORT)
+        // ==========================================
+        function drawNetworkGraph(data) {
+            const container = d3.select("#network-viz");
+            const width = container.node().getBoundingClientRect().width;
+            const height = container.node().getBoundingClientRect().height;
+            const svg = container.append("svg").attr("viewBox", `0 0 ${width} ${height}`).style("width", "100%").style("height", "100%").on("click", resetView);
+            const g = svg.append("g"); 
+            const zoom = d3.zoom().scaleExtent([0.1, 4]).on("zoom", (e) => g.attr("transform", e.transform));
+            svg.call(zoom);
+
+            const { nodes, links } = processNetworkData(data);
+            const weightExtent = d3.extent(links, d => d.value);
+            const thicknessScale = d3.scaleSqrt().domain(weightExtent).range([1, 10]);
+            const opacityScale = d3.scaleLinear().domain(weightExtent).range([0.2, 0.8]);
+            const sizeScale = d3.scaleSqrt().domain(d3.extent(nodes, d => d.count)).range([8, 35]); 
+
+            const simulation = d3.forceSimulation(nodes)
+                .force("link", d3.forceLink(links).id(d => d.id).distance(150))
+                .force("charge", d3.forceManyBody().strength(-400))
+                .force("center", d3.forceCenter(width / 2, height / 2))
+                .force("collide", d3.forceCollide().radius(d => sizeScale(d.count) + 10));
+
+            const link = g.append("g").selectAll("line").data(links).join("line")
+                .attr("class", "link").attr("stroke", "#555")
+                .attr("stroke-width", d => thicknessScale(d.value)).attr("stroke-opacity", d => opacityScale(d.value))
+                .on("mouseover", (event, d) => {
+                    if (currentFocusNode && (d.source.id === currentFocusNode.id || d.target.id === currentFocusNode.id)) {
+                        d3.select(event.currentTarget).style("stroke", "#d62728").style("stroke-opacity", 1);
+                        showTooltip(event, `<strong>${d.source.id} & ${d.target.id}</strong><br>Paired in ${d.value} recipes`);
+                    }
+                })
+                .on("mouseout", (event, d) => {
+                    if (!currentFocusNode) {
+                        d3.select(event.currentTarget).style("stroke", "#555").style("stroke-opacity", opacityScale(d.value));
+                    } else { d3.select(event.currentTarget).style("stroke", "#d62728"); }
+                    hideTooltip();
+                });
+
+            const node = g.append("g").selectAll(".node").data(nodes).join("g").attr("class", "node").call(drag(simulation));
+            
+            node.append("circle")
+                .attr("r", d => sizeScale(d.count))
+                .attr("fill", d => networkColor(d.group));
+
+            // ICONS: Set initial opacity based on global toggle state
+            node.append("text")
+                .attr("class", "node-icon")
+                .attr("font-size", d => Math.max(10, sizeScale(d.count) * 1.2) + "px") 
+                .style("opacity", showIcons ? 1 : 0) // <--- CHECK GLOBAL STATE
+                .text(d => getIcon(d.id) || ""); 
+
+            node.append("text")
+                .attr("class", "node-label")
+                .text(d => d.id)
+                .attr("dy", d => -sizeScale(d.count) - 5) 
+                .style("opacity", d => d.count > 4 ? 1 : 0);
+
+            node.on("click", (e, d) => { e.stopPropagation(); focusNode(d); });
+            node.on("mouseover", (e, d) => showTooltip(e, `<strong>${d.id}</strong><br>Used in ${d.count} recipes`)).on("mouseout", hideTooltip);
+
+            simulation.on("tick", () => {
+                link.attr("x1", d => d.source.x).attr("y1", d => d.source.y).attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+                node.attr("transform", d => `translate(${d.x},${d.y})`);
+            });
+
+            function focusNode(selectedNode) {
+                currentFocusNode = selectedNode; 
+                node.style("opacity", 0.1).style("pointer-events", "none"); 
+                link.style("stroke-opacity", 0.05).style("stroke", "#999").style("pointer-events", "none"); 
+                const neighborIds = new Set([selectedNode.id]);
+                const connectedLinks = link.filter(l => l.source.id === selectedNode.id || l.target.id === selectedNode.id);
+                connectedLinks.each(l => { neighborIds.add(l.source.id); neighborIds.add(l.target.id); });
+                node.filter(n => neighborIds.has(n.id)).style("opacity", 1).style("pointer-events", "auto");
+                connectedLinks.style("stroke-opacity", 1).style("stroke", "#d62728").style("pointer-events", "auto").raise();
+            }
+
+            function resetView() {
+                currentFocusNode = null; 
+                node.style("opacity", 1).style("pointer-events", "auto");
+                link.style("stroke", "#555").style("stroke-opacity", d => opacityScale(d.value)).style("pointer-events", "auto"); 
+            }
+        }
+
+        // ==========================================
+        // 2. BUBBLE CHART (UNCHANGED)
+        // ==========================================
+        function drawBubbleChart(data) {
+            const container = d3.select("#euler-viz");
+            const width = container.node().getBoundingClientRect().width;
+            const height = container.node().getBoundingClientRect().height;
+            const svg = container.append("svg").attr("viewBox", `0 0 ${width} ${height}`).style("width", "100%").style("height", "100%");
+            const g = svg.append("g"); 
+            const zoom = d3.zoom().scaleExtent([0.5, 5]).on("zoom", (e) => g.attr("transform", e.transform));
+            svg.call(zoom);
+
+            const groupedData = d3.rollup(data, v => v, d => d.subcategory);
+            const hierarchyData = { name: "root", children: [] };
+            groupedData.forEach((recipes, key) => {
+                if(key && key !== "nan") hierarchyData.children.push({ name: key, recipes: recipes, value: recipes.length });
+            });
+
+            const root = d3.hierarchy(hierarchyData).sum(d => d.value).sort((a, b) => b.value - a.value);
+            const pack = d3.pack().size([width, height]).padding(10);
+            const nodes = pack(root).descendants().slice(1);
+            const nodeGroup = g.selectAll("g").data(nodes).join("g").attr("transform", d => `translate(${d.x},${d.y})`);
+
+            nodeGroup.append("circle")
+                .attr("class", "bubble")
+                .attr("r", d => d.r)
+                .attr("fill", d => bubbleColor(d.data.name))
+                .on("click", (e, d) => {
+                    const clickedName = d.data.name;
+                    if (selectedCategory === clickedName) {
+                        selectedCategory = null; updateList(data, "All Recipes");
+                        d3.selectAll(".bubble").attr("opacity", 1).attr("stroke", null);
+                    } else {
+                        selectedCategory = clickedName; updateList(d.data.recipes, clickedName);
+                        d3.selectAll(".bubble").attr("opacity", 0.3).attr("stroke", null);
+                        d3.select(e.target).attr("opacity", 1).attr("stroke", "#333").attr("stroke-width", 2);
+                    }
+                });
+
+            nodeGroup.append("text")
+                .attr("class", "bubble-label")
+                .style("opacity", d => d.r > 15 ? 1 : 0)
+                .style("font-size", d => d.r > 30 ? "11px" : "9px")
+                .text(d => d.data.name)
+                .each(function(d) { if (d.r > 15) wrap(d3.select(this), d.r * 1.9); });
+        }
+
+        // ==========================================
+        // 3. RECIPE LIST
+        // ==========================================
+        function updateList(recipes, title) {
+            d3.select("#list-title").text(`3. ${title} (${recipes.length})`);
+            const container = d3.select("#recipe-list-container");
+            container.html("");
+            if(recipes.length === 0) { container.html("<p style='padding:10px'>No recipes found.</p>"); return; }
+            const items = container.selectAll(".recipe-item")
+                .data(recipes)
+                .enter().append("div")
+                .attr("class", "recipe-item")
+                .on("click", function(e, d) {
+                    d3.selectAll(".recipe-item").classed("selected", false);
+                    d3.select(this).classed("selected", true);
+                    drawGanttChart(d);
+                    setTimeout(() => { document.getElementById("gantt-section").scrollIntoView({ behavior: "smooth" }); }, 100);
+                });
+            items.append("p").attr("class", "recipe-title").text(d => d.title);
+            items.append("p").attr("class", "recipe-meta").text(d => `🕒 ${d.total_time} mins • ${d.ingredients.length} ingredients`);
+        }
+
+        // ==========================================
+        // 4. GANTT CHART
+        // ==========================================
+        function drawGanttChart(recipe) {
+            const section = document.getElementById("gantt-section");
+            section.style.display = "flex";
+            const container = d3.select("#gantt-viz");
+            container.html(""); 
+            d3.select("#gantt-title").text(`4. Timeline: ${recipe.title}`);
+
+            if (!recipe.timeline || recipe.timeline.length === 0) {
+                container.html("<div style='padding:40px; text-align:center; color:#666'>No steps data found for this recipe.</div>");
+                return;
+            }
+
+            const width = container.node().getBoundingClientRect().width;
+            const height = container.node().getBoundingClientRect().height;
+            const margin = { top: 30, right: 30, bottom: 40, left: 100 };
+
+            const svg = container.append("svg").attr("width", width).attr("height", height);
+            const yScale = d3.scaleBand().domain(recipe.timeline.map(d => `Step ${d.step_number}`)).range([margin.top, height - margin.bottom]).padding(0.3);
+            const maxTime = recipe.total_time > 0 ? recipe.total_time : 60;
+            const xScale = d3.scaleLinear().domain([0, maxTime]).range([margin.left, width - margin.right]);
+
+            const xAxisGroup = svg.append("g").attr("transform", `translate(0, ${height - margin.bottom})`);
+            const yAxisGroup = svg.append("g").attr("transform", `translate(${margin.left}, 0)`);
+
+            const zoom = d3.zoom().scaleExtent([1, 5]).translateExtent([[0, 0], [width, height]]).extent([[0, 0], [width, height]])
+                .on("zoom", (event) => { updateChart(event.transform.rescaleX(xScale)); });
+
+            svg.append("rect").attr("width", width).attr("height", height).style("fill", "none").style("pointer-events", "all").call(zoom);
+
+            const contentGroup = svg.append("g");
+            updateChart(xScale);
+
+            function updateChart(currentXScale) {
+                xAxisGroup.call(d3.axisBottom(currentXScale).ticks(10).tickFormat(d => d + "m"));
+                yAxisGroup.call(d3.axisLeft(yScale));
+                const bars = contentGroup.selectAll(".bar").data(recipe.timeline);
+                bars.enter().append("rect").attr("class", "bar").attr("rx", 4)
+                    .attr("fill", d => d.type === 'active' ? "#ff9f43" : "#54a0ff")
+                    .merge(bars).attr("y", d => yScale(`Step ${d.step_number}`)).attr("height", yScale.bandwidth())
+                    .attr("x", d => currentXScale(d.start_time))
+                    .attr("width", d => Math.max(2, currentXScale(d.start_time + d.duration) - currentXScale(d.start_time)))
+                    .on("mouseover", (event, d) => showTooltip(event, `<strong>Step ${d.step_number}</strong> (${d.duration} min)<br>${d.task_text}`))
+                    .on("mouseout", hideTooltip);
+                bars.exit().remove();
+                
+                const labels = contentGroup.selectAll(".gantt-label").data(recipe.timeline);
+                labels.enter().append("text").attr("class", "gantt-label").attr("dy", "0.35em").merge(labels)
+                    .attr("x", d => currentXScale(d.start_time) + 5).attr("y", d => yScale(`Step ${d.step_number}`) + yScale.bandwidth() / 2)
+                    .text(d => { const w = currentXScale(d.start_time + d.duration) - currentXScale(d.start_time); return w > 50 ? (d.task_text.length > 20 ? d.task_text.substring(0, 20)+"..." : d.task_text) : ""; });
+                labels.exit().remove();
+            }
+        }
+
+        function hideGantt() {
+            document.getElementById("gantt-section").style.display = "none";
+            d3.selectAll(".recipe-item").classed("selected", false);
+        }
+
+        // --- UTILS ---
+        function wrap(textSelection, width) {
+            textSelection.each(function() {
+                let text = d3.select(this), words = text.text().split(/\s+/).reverse(), word, line = [], lineNumber = 0, lineHeight = 1.1, y = text.attr("y"), dy = 0, tspan = text.text(null).append("tspan").attr("x", 0).attr("y", y).attr("dy", dy + "em");
+                while (word = words.pop()) {
+                    line.push(word); tspan.text(line.join(" "));
+                    if (tspan.node().getComputedTextLength() > width) {
+                        line.pop(); tspan.text(line.join(" ")); line = [word];
+                        tspan = text.append("tspan").attr("x", 0).attr("y", y).attr("dy", ++lineNumber * lineHeight + dy + "em").text(word);
+                    }
+                }
+                if (lineNumber > 0) text.style("transform", `translateY(-${(lineNumber * lineHeight) / 2}em)`);
+                else text.select("tspan").attr("dy", "0.3em");
+            });
+        }
+        function processNetworkData(recipes) {
+            const nodeMap = new Map(); const linkMap = new Map();
+            recipes.forEach(recipe => {
+                const ingredients = recipe.ingredients;
+                ingredients.forEach(ing => {
+                    if (!nodeMap.has(ing)) nodeMap.set(ing, { id: ing, count: 0, group: Math.floor(Math.random() * 5) });
+                    nodeMap.get(ing).count++;
+                });
+                for (let i = 0; i < ingredients.length; i++) {
+                    for (let j = i + 1; j < ingredients.length; j++) {
+                        const source = ingredients[i], target = ingredients[j], key = [source, target].sort().join("|");
+                        if (!linkMap.has(key)) linkMap.set(key, { source: source, target: target, value: 0 });
+                        linkMap.get(key).value++;
+                    }
+                }
+            });
+            let nodes = Array.from(nodeMap.values()).filter(d => d.count >= 2);
+            const validNodeIds = new Set(nodes.map(d => d.id));
+            let links = Array.from(linkMap.values()).filter(d => validNodeIds.has(d.source) && validNodeIds.has(d.target) && d.value >= 2);
+            return { nodes, links };
+        }
+        function drag(simulation) {
+            function dragstarted(event, d) { if (!event.active) simulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; }
+            function dragged(event, d) { d.fx = event.x; d.fy = event.y; }
+            function dragended(event, d) { if (!event.active) simulation.alphaTarget(0); d.fx = null; d.fy = null; }
+            return d3.drag().on("start", dragstarted).on("drag", dragged).on("end", dragended);
+        }
+        function showTooltip(event, htmlContent) {
+            tooltip.style("opacity", 1).html(htmlContent).style("left", (event.pageX + 10) + "px").style("top", (event.pageY - 20) + "px");
+        }
+        function hideTooltip() { tooltip.style("opacity", 0); }
+    </script>
+</body>
+</html>
