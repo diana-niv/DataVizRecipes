@@ -146,9 +146,12 @@
             <div class="card">
                 <div class="card-header">
                     <h3>Ingredient Pairing Network</h3>
-                    <label class="toggle-container">
-                        <input type="checkbox" id="icon-toggle" checked> Show Icons
-                    </label>
+                    <div style="display: flex; align-items: center;">
+                        <input type="text" id="network-search" placeholder="Search ingredient..." style="margin-right: 15px; padding: 4px 8px; border: 1px solid #ccc; border-radius: 4px;">
+                        <label class="toggle-container">
+                            <input type="checkbox" id="icon-toggle" checked> Show Icons
+                        </label>
+                    </div>
                 </div>
                 <div id="network-viz">
                     <div class="chart-subtitle">Click a Node to focus. <strong>Click background</strong> to reset. Hover edges for details.</div>
@@ -171,6 +174,7 @@
 
             <div class="card">
                 <h3 id="list-title">All Recipes</h3>
+                <input type="text" id="recipe-search" placeholder="Search recipes..." style="width: 100%; box-sizing: border-box; margin-bottom: 10px; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                 <p>Select a recipe to see its timeline below.</p>
                 <div id="recipe-list-container">
                     <p style="padding:10px">Loading data...</p>
@@ -191,13 +195,15 @@
     <div id="tooltip" class="tooltip"></div>
 
     <script>
-        const bubbleColor = d3.scaleOrdinal(d3.schemeSet3);
-        const networkColor = d3.scaleOrdinal(d3.schemeCategory10);
+        const networkColor = d3.scaleOrdinal()
+            .domain(['Dairy', 'Meat', 'Produce', 'Baking', 'Spices', 'Other'])
+            .range(['#fdcb6e', '#ff7675', '#55efc4', '#e17055', '#74b9ff', '#b2bec3']);
         const tooltip = d3.select("#tooltip");
         
         let currentFocusNode = null;
         let selectedCategory = null;
         let showIcons = true; // State for icon toggle
+        let allRecipes = []; // Global store
 
         // --- ICON MAPPER ---
         const ingredientIcons = {
@@ -219,6 +225,22 @@
             return null;
         }
 
+        function getIngredientGroup(name) {
+            const lower = name.toLowerCase();
+            const groups = {
+                'Dairy': ['egg', 'milk', 'cream', 'butter', 'cheese', 'yogurt', 'curd', 'whey', 'buttermilk'],
+                'Meat': ['bacon', 'sausage', 'ham', 'beef', 'chicken', 'pork', 'turkey', 'meat', 'prosciutto'],
+                'Produce': ['apple', 'banana', 'berry', 'fruit', 'onion', 'garlic', 'spinach', 'potato', 'tomato', 'mushroom', 'lemon', 'lime', 'citrus', 'vegetable', 'corn', 'avocado', 'carrot'],
+                'Baking': ['flour', 'wheat', 'oats', 'bread', 'toast', 'sugar', 'baking', 'yeast', 'dough', 'batter', 'cookie', 'cake', 'waffle', 'pancake', 'muffin'],
+                'Spices': ['salt', 'pepper', 'oil', 'cinnamon', 'vanilla', 'syrup', 'honey', 'spice', 'extract', 'sauce', 'vinegar', 'mustard']
+            };
+
+            for (const [group, keywords] of Object.entries(groups)) {
+                if (keywords.some(k => lower.includes(k))) return group;
+            }
+            return 'Other';
+        }
+
         // --- LISTENERS ---
         // Add listener for the toggle switch
         d3.select("#icon-toggle").on("change", function() {
@@ -228,10 +250,22 @@
         });
 
         d3.json("parsed_data.json").then(data => {
+            allRecipes = data;
             console.log("Data loaded:", data);
             drawBubbleChart(data);
             drawNetworkGraph(data);
             updateList(data, "All Recipes");
+
+            // Recipe Search Listener
+            d3.select("#recipe-search").on("input", function() {
+                const term = this.value.toLowerCase();
+                const filtered = allRecipes.filter(d => 
+                    (selectedCategory ? d.subcategory === selectedCategory : true) &&
+                    d.title.toLowerCase().includes(term)
+                );
+                updateList(filtered, selectedCategory ? selectedCategory : "All Recipes");
+            });
+
         }).catch(err => {
             console.error(err);
             document.body.innerHTML = `<h2 style="color:red; padding:20px">Error: ${err.message}<br>Is your Python server running?</h2>`;
@@ -320,6 +354,23 @@
                 node.style("opacity", 1).style("pointer-events", "auto");
                 link.style("stroke", "#555").style("stroke-opacity", d => opacityScale(d.value)).style("pointer-events", "auto"); 
             }
+
+            // Network Search Listener
+            d3.select("#network-search").on("input", function() {
+                const term = this.value.toLowerCase().trim();
+                if (!term) { resetView(); return; }
+                
+                // Find exact match or partial match
+                const found = nodes.find(n => n.id.toLowerCase() === term) || 
+                              nodes.find(n => n.id.toLowerCase().includes(term));
+                
+                if (found) {
+                    focusNode(found);
+                } else {
+                    // Optional: maybe show "No match" feedback
+                    resetView();
+                }
+            });
         }
 
         // ==========================================
@@ -348,14 +399,24 @@
             nodeGroup.append("circle")
                 .attr("class", "bubble")
                 .attr("r", d => d.r)
-                .attr("fill", d => bubbleColor(d.data.name))
+                .attr("fill", "#a29bfe")
                 .on("click", (e, d) => {
                     const clickedName = d.data.name;
+                    const searchTerm = d3.select("#recipe-search").property("value").toLowerCase();
+
                     if (selectedCategory === clickedName) {
-                        selectedCategory = null; updateList(data, "All Recipes");
+                        selectedCategory = null; 
+                        
+                        const filtered = allRecipes.filter(r => r.title.toLowerCase().includes(searchTerm));
+                        updateList(filtered, "All Recipes");
+
                         d3.selectAll(".bubble").attr("opacity", 1).attr("stroke", null);
                     } else {
-                        selectedCategory = clickedName; updateList(d.data.recipes, clickedName);
+                        selectedCategory = clickedName; 
+                        
+                        const filtered = d.data.recipes.filter(r => r.title.toLowerCase().includes(searchTerm));
+                        updateList(filtered, clickedName);
+
                         d3.selectAll(".bubble").attr("opacity", 0.3).attr("stroke", null);
                         d3.select(e.target).attr("opacity", 1).attr("stroke", "#333").attr("stroke-width", 2);
                     }
@@ -548,7 +609,7 @@
             recipes.forEach(recipe => {
                 const ingredients = recipe.ingredients;
                 ingredients.forEach(ing => {
-                    if (!nodeMap.has(ing)) nodeMap.set(ing, { id: ing, count: 0, group: Math.floor(Math.random() * 5) });
+                    if (!nodeMap.has(ing)) nodeMap.set(ing, { id: ing, count: 0, group: getIngredientGroup(ing) });
                     nodeMap.get(ing).count++;
                 });
                 for (let i = 0; i < ingredients.length; i++) {
