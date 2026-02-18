@@ -86,11 +86,62 @@
         .bubble:hover { stroke: #333; stroke-width: 2px; opacity: 0.9; }
         .bubble-label { pointer-events: none; text-anchor: middle; fill: white; text-shadow: 0 1px 3px rgba(0,0,0,0.8); font-weight: 600; }
 
-        .recipe-item { padding: 10px; border-bottom: 1px solid #f0f0f0; cursor: pointer; transition: background 0.2s; }
+        .recipe-item {
+            padding: 10px;
+            border-bottom: 1px solid #f0f0f0;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
         .recipe-item:hover { background-color: #eef2f5; }
-        .recipe-item.selected { background-color: #e0e7ff; border-left: 4px solid #54a0ff; }
+        .recipe-item.selected {
+            background-color: #e0e7ff;
+            border-left: 4px solid #54a0ff;
+            padding-left: 16px;
+        }
         .recipe-title { font-weight: bold; color: #333; margin: 0; }
         .recipe-meta { font-size: 12px; color: #888; margin: 4px 0 0 0; }
+
+        .recipe-ingredients {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease;
+            margin: 0;
+            padding: 0;
+        }
+        .recipe-item.selected .recipe-ingredients {
+            max-height: 300px;
+            overflow-y: auto;
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #d0d7de;
+        }
+        .ingredients-header {
+            font-size: 11px;
+            font-weight: 600;
+            color: #3498db;
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .ingredient-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .ingredient-list li {
+            padding: 3px 0 3px 16px;
+            font-size: 11px;
+            color: #555;
+            position: relative;
+            line-height: 1.4;
+        }
+        .ingredient-list li:before {
+            content: "•";
+            position: absolute;
+            left: 4px;
+            color: #3498db;
+            font-weight: bold;
+        }
 
         .node circle { stroke: #fff; stroke-width: 2px; cursor: pointer; transition: fill 0.2s; }
         .node:hover circle { stroke: #333; }
@@ -117,6 +168,63 @@
             position: absolute; text-align: center; padding: 8px 12px;
             font-size: 12px; background: rgba(0,0,0,0.9); color: #fff;
             border-radius: 4px; pointer-events: none; opacity: 0; z-index: 200; box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+        }
+
+        .scroll-indicator {
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #3498db;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 30px;
+            box-shadow: 0 6px 20px rgba(52, 152, 219, 0.4);
+            font-size: 14px;
+            font-weight: 600;
+            z-index: 1000;
+            cursor: pointer;
+            display: none;
+            align-items: center;
+            gap: 10px;
+            animation: bounce 2s infinite;
+            transition: all 0.3s ease;
+        }
+
+        .scroll-indicator:hover {
+            transform: translateX(-50%) translateY(-3px);
+            background: #2980b9;
+            box-shadow: 0 8px 25px rgba(52, 152, 219, 0.6);
+        }
+
+        .scroll-indicator.visible {
+            display: flex;
+        }
+
+        .scroll-indicator .arrow {
+            font-size: 20px;
+            animation: arrowBounce 1s infinite;
+        }
+
+        @keyframes bounce {
+            0%, 20%, 50%, 80%, 100% {
+                transform: translateX(-50%) translateY(0);
+            }
+            40% {
+                transform: translateX(-50%) translateY(-10px);
+            }
+            60% {
+                transform: translateX(-50%) translateY(-5px);
+            }
+        }
+
+        @keyframes arrowBounce {
+            0%, 100% {
+                transform: translateY(0);
+            }
+            50% {
+                transform: translateY(5px);
+            }
         }
 
         .chart-subtitle {
@@ -175,7 +283,7 @@
             <div class="card">
                 <h3 id="list-title">All Recipes</h3>
                 <input type="text" id="recipe-search" placeholder="Search recipes..." style="width: 100%; box-sizing: border-box; margin-bottom: 10px; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
-                <p>Select a recipe to see its timeline below.</p>
+                <p>Select a recipe to see its timeline and ingredients.</p>
                 <div id="recipe-list-container">
                     <p style="padding:10px">Loading data...</p>
                 </div>
@@ -193,6 +301,10 @@
     </div>
 
     <div id="tooltip" class="tooltip"></div>
+    <div id="scroll-indicator" class="scroll-indicator">
+        <span>Timeline ready below</span>
+        <span class="arrow">↓</span>
+    </div>
 
     <script>
         const networkColor = d3.scaleOrdinal()
@@ -437,19 +549,59 @@
             d3.select("#list-title").text(`${title} (${recipes.length})`);
             const container = d3.select("#recipe-list-container");
             container.html("");
-            if(recipes.length === 0) { container.html("<p style='padding:10px'>No recipes found.</p>"); return; }
+
+            if(recipes.length === 0) {
+                container.html("<p style='padding:10px'>No recipes found.</p>");
+                return;
+            }
+
             const items = container.selectAll(".recipe-item")
                 .data(recipes)
                 .enter().append("div")
                 .attr("class", "recipe-item")
                 .on("click", function(e, d) {
+                    const isCurrentlySelected = d3.select(this).classed("selected");
+
+                    // Deselect all recipes
                     d3.selectAll(".recipe-item").classed("selected", false);
-                    d3.select(this).classed("selected", true);
-                    drawGanttChart(d);
-                    setTimeout(() => { document.getElementById("gantt-section").scrollIntoView({ behavior: "smooth" }); }, 100);
+
+                    if (isCurrentlySelected) {
+                        // If clicking the same recipe, deselect it and hide Gantt
+                        hideGantt();
+                    } else {
+                        // Select this recipe and show Gantt
+                        d3.select(this).classed("selected", true);
+                        drawGanttChart(d);
+                        showScrollIndicator();
+                    }
                 });
-            items.append("p").attr("class", "recipe-title").text(d => d.title);
-            items.append("p").attr("class", "recipe-meta").text(d => `🕒 ${d.total_time} mins • ${d.ingredients.length} ingredients`);
+
+            // Add recipe title
+            items.append("p")
+                .attr("class", "recipe-title")
+                .text(d => d.title);
+
+            // Add recipe meta
+            items.append("p")
+                .attr("class", "recipe-meta")
+                .text(d => `🕒 ${d.total_time} mins • ${d.ingredients.length} ingredients`);
+
+            // Add expandable ingredients section
+            const ingredientsDiv = items.append("div")
+                .attr("class", "recipe-ingredients");
+
+            ingredientsDiv.append("div")
+                .attr("class", "ingredients-header")
+                .text(d => `Ingredients (${d.ingredients.length}):`);
+
+            ingredientsDiv.append("ul")
+                .attr("class", "ingredient-list")
+                .each(function(d) {
+                    const ul = d3.select(this);
+                    d.ingredients.forEach(ingredient => {
+                        ul.append("li").text(ingredient);
+                    });
+                });
         }
 
         // --- FISHEYE PLUGIN IMPLEMENTATION ---
@@ -576,6 +728,38 @@
         function hideGantt() {
             document.getElementById("gantt-section").style.display = "none";
             d3.selectAll(".recipe-item").classed("selected", false);
+            hideScrollIndicator();
+        }
+
+        // ==========================================
+        // SCROLL INDICATOR FUNCTIONS
+        // ==========================================
+        function showScrollIndicator() {
+            const indicator = document.getElementById("scroll-indicator");
+            indicator.classList.add("visible");
+
+            // Add click handler to scroll to Gantt
+            indicator.onclick = function() {
+                document.getElementById("gantt-section").scrollIntoView({ behavior: "smooth" });
+                hideScrollIndicator();
+            };
+
+            // Auto-hide if user scrolls near Gantt section
+            const checkScroll = function() {
+                const ganttSection = document.getElementById("gantt-section");
+                const rect = ganttSection.getBoundingClientRect();
+                if (rect.top < window.innerHeight && rect.top > 0) {
+                    hideScrollIndicator();
+                    window.removeEventListener("scroll", checkScroll);
+                }
+            };
+            window.addEventListener("scroll", checkScroll);
+        }
+
+        function hideScrollIndicator() {
+            const indicator = document.getElementById("scroll-indicator");
+            indicator.classList.remove("visible");
+            indicator.onclick = null;
         }
 
         // --- UTILS ---
