@@ -80,8 +80,8 @@
         
         /* GANTT SECTION */
         #gantt-section { display: none; height: 400px; }
-        #gantt-viz { flex-grow: 1; width: 100%; background: #fafafa; border-radius: 8px; position: relative; }
-        
+        #gantt-viz { flex-grow: 1; width: 100%; border-radius: 8px; position: relative; }
+
         .bubble { cursor: pointer; transition: all 0.3s ease; }
         .bubble:hover { stroke: #333; stroke-width: 2px; opacity: 0.9; }
         .bubble-label { pointer-events: none; text-anchor: middle; fill: white; text-shadow: 0 1px 3px rgba(0,0,0,0.8); font-weight: 600; }
@@ -229,7 +229,7 @@
 
         .chart-subtitle {
             position: absolute;
-            bottom: 10px;
+            bottom: 6px;
             right: 20px;
             font-size: 12px;
             color: #777;
@@ -241,6 +241,52 @@
         }
 
         #euler-viz, #network-viz, #gantt-viz { position: relative; }
+
+        /* NETWORK SEARCH DROPDOWN */
+        #network-search-dropdown {
+            position: absolute;
+            top: calc(100% + 4px);
+            left: 0;
+            width: 100%;
+            min-width: 180px;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            box-shadow: 0 6px 18px rgba(0,0,0,0.12);
+            z-index: 500;
+            max-height: 220px;
+            overflow-y: auto;
+            display: none;
+        }
+        #network-search-dropdown.open { display: block; }
+        .search-dropdown-item {
+            padding: 7px 12px;
+            font-size: 13px;
+            cursor: pointer;
+            color: #333;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: background 0.15s;
+        }
+        .search-dropdown-item:hover, .search-dropdown-item.active {
+            background: #eef2f5;
+        }
+        .search-dropdown-item .dropdown-icon { font-size: 15px; }
+        .search-dropdown-item .dropdown-label { flex: 1; }
+        .search-dropdown-item .dropdown-count {
+            font-size: 11px;
+            color: #999;
+            background: #f0f0f0;
+            border-radius: 10px;
+            padding: 1px 7px;
+        }
+        .search-dropdown-empty {
+            padding: 10px 12px;
+            font-size: 13px;
+            color: #aaa;
+            text-align: center;
+        }
     </style>
 </head>
 <body>
@@ -255,7 +301,10 @@
                 <div class="card-header">
                     <h3>Ingredient Pairing Network</h3>
                     <div style="display: flex; align-items: center;">
-                        <input type="text" id="network-search" placeholder="Search ingredient..." style="margin-right: 15px; padding: 4px 8px; border: 1px solid #ccc; border-radius: 4px;">
+                        <div style="position: relative; margin-right: 15px;">
+                            <input type="text" id="network-search" placeholder="Search ingredient..." style="padding: 4px 8px; border: 1px solid #ccc; border-radius: 4px; width: 180px;">
+                            <div id="network-search-dropdown"></div>
+                        </div>
                         <label class="toggle-container">
                             <input type="checkbox" id="icon-toggle" checked> Show Icons
                         </label>
@@ -450,8 +499,8 @@
                 node.attr("transform", d => `translate(${d.x},${d.y})`);
             });
 
-            function focusNode(selectedNode) {
-                currentFocusNode = selectedNode; 
+            function focusNode(selectedNode, panToCenter = false) {
+                currentFocusNode = selectedNode;
                 node.style("opacity", 0.1).style("pointer-events", "none"); 
                 link.style("stroke-opacity", 0.05).style("stroke", "#999").style("pointer-events", "none"); 
                 const neighborIds = new Set([selectedNode.id]);
@@ -459,6 +508,46 @@
                 connectedLinks.each(l => { neighborIds.add(l.source.id); neighborIds.add(l.target.id); });
                 node.filter(n => neighborIds.has(n.id)).style("opacity", 1).style("pointer-events", "auto");
                 connectedLinks.style("stroke-opacity", 1).style("stroke", "#d62728").style("pointer-events", "auto").raise();
+
+                if (panToCenter) {
+                    centerOnNode(selectedNode);
+                }
+            }
+
+            function centerOnNode(targetNode) {
+                // Collect the selected node + all its direct neighbours
+                const neighborIds = new Set([targetNode.id]);
+                links.forEach(l => {
+                    if (l.source.id === targetNode.id) neighborIds.add(l.target.id);
+                    if (l.target.id === targetNode.id) neighborIds.add(l.source.id);
+                });
+                const clusterNodes = nodes.filter(n => neighborIds.has(n.id));
+
+                // Compute bounding box of the cluster
+                const padding = 80;
+                const xs = clusterNodes.map(n => n.x);
+                const ys = clusterNodes.map(n => n.y);
+                const x0 = Math.min(...xs) - padding;
+                const x1 = Math.max(...xs) + padding;
+                const y0 = Math.min(...ys) - padding;
+                const y1 = Math.max(...ys) + padding;
+
+                const svgWidth  = +svg.attr("viewBox").split(" ")[2] || width;
+                const svgHeight = +svg.attr("viewBox").split(" ")[3] || height;
+
+                // Scale to fit the cluster, but don't zoom in too far
+                const scale = Math.min(
+                    svgWidth  / (x1 - x0),
+                    svgHeight / (y1 - y0),
+                    2.5   // max zoom cap
+                );
+                const tx = svgWidth  / 2 - ((x0 + x1) / 2) * scale;
+                const ty = svgHeight / 2 - ((y0 + y1) / 2) * scale;
+
+                svg.transition()
+                    .duration(750)
+                    .ease(d3.easeCubicInOut)
+                    .call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
             }
 
             function resetView() {
@@ -467,20 +556,90 @@
                 link.style("stroke", "#555").style("stroke-opacity", d => opacityScale(d.value)).style("pointer-events", "auto"); 
             }
 
-            // Network Search Listener
-            d3.select("#network-search").on("input", function() {
-                const term = this.value.toLowerCase().trim();
-                if (!term) { resetView(); return; }
-                
-                // Find exact match or partial match
-                const found = nodes.find(n => n.id.toLowerCase() === term) || 
-                              nodes.find(n => n.id.toLowerCase().includes(term));
-                
-                if (found) {
-                    focusNode(found);
+            // Network Search Dropdown
+            const searchInput = document.getElementById("network-search");
+            const dropdown = document.getElementById("network-search-dropdown");
+            let activeIndex = -1;
+
+            function showDropdown(matches) {
+                dropdown.innerHTML = "";
+                activeIndex = -1;
+                if (matches.length === 0) {
+                    dropdown.innerHTML = `<div class="search-dropdown-empty">No ingredients found</div>`;
                 } else {
-                    // Optional: maybe show "No match" feedback
+                    matches.forEach((n, i) => {
+                        const item = document.createElement("div");
+                        item.className = "search-dropdown-item";
+                        const icon = getIcon(n.id) || "";
+                        item.innerHTML = `
+                            ${icon ? `<span class="dropdown-icon">${icon}</span>` : ""}
+                            <span class="dropdown-label">${n.id}</span>
+                            <span class="dropdown-count">${n.count} recipes</span>`;
+                        item.addEventListener("mousedown", (e) => {
+                            e.preventDefault(); // keep focus on input
+                            searchInput.value = n.id;
+                            closeDropdown();
+                            focusNode(n, true);
+                        });
+                        dropdown.appendChild(item);
+                    });
+                }
+                dropdown.classList.add("open");
+            }
+
+            function closeDropdown() {
+                dropdown.classList.remove("open");
+                activeIndex = -1;
+            }
+
+            searchInput.addEventListener("input", function() {
+                const term = this.value.toLowerCase().trim();
+                if (!term) {
+                    closeDropdown();
                     resetView();
+                    return;
+                }
+                const matches = nodes.filter(n => n.id.toLowerCase().includes(term))
+                                     .sort((a, b) => b.count - a.count);
+                showDropdown(matches);
+            });
+
+            // Keyboard navigation
+            searchInput.addEventListener("keydown", function(e) {
+                const items = dropdown.querySelectorAll(".search-dropdown-item");
+                if (!items.length) return;
+                if (e.key === "ArrowDown") {
+                    e.preventDefault();
+                    activeIndex = Math.min(activeIndex + 1, items.length - 1);
+                    items.forEach((el, i) => el.classList.toggle("active", i === activeIndex));
+                    items[activeIndex].scrollIntoView({ block: "nearest" });
+                } else if (e.key === "ArrowUp") {
+                    e.preventDefault();
+                    activeIndex = Math.max(activeIndex - 1, 0);
+                    items.forEach((el, i) => el.classList.toggle("active", i === activeIndex));
+                    items[activeIndex].scrollIntoView({ block: "nearest" });
+                } else if (e.key === "Enter") {
+                    if (activeIndex >= 0 && activeIndex < items.length) {
+                        items[activeIndex].dispatchEvent(new MouseEvent("mousedown"));
+                    }
+                } else if (e.key === "Escape") {
+                    closeDropdown();
+                }
+            });
+
+            // Close dropdown when clicking outside
+            document.addEventListener("click", function(e) {
+                if (!searchInput.contains(e.target) && !dropdown.contains(e.target)) {
+                    closeDropdown();
+                }
+            });
+
+            searchInput.addEventListener("focus", function() {
+                const term = this.value.toLowerCase().trim();
+                if (term) {
+                    const matches = nodes.filter(n => n.id.toLowerCase().includes(term))
+                                         .sort((a, b) => b.count - a.count);
+                    showDropdown(matches);
                 }
             });
         }
@@ -637,11 +796,6 @@
             container.html(""); 
             d3.select("#gantt-title").text(`Timeline: ${recipe.title}`);
 
-            // Append subtitle/legend
-            container.append("div")
-                .attr("class", "chart-subtitle")
-                .html('Scroll inside chart to Zoom/Expand time. <span style="color:#ff9f43">■ Active Prep</span> <span style="color:#54a0ff">■ Passive Cooking</span>');
-
             if (!recipe.timeline || recipe.timeline.length === 0) {
                 container.html("<div style='padding:40px; text-align:center; color:#666'>No steps data found for this recipe.</div>");
                 return;
@@ -649,10 +803,19 @@
 
             const width = container.node().getBoundingClientRect().width;
             const height = container.node().getBoundingClientRect().height;
-            const margin = { top: 30, right: 30, bottom: 40, left: 100 };
+            const margin = { top: 30, right: 30, bottom: 70, left: 100 };
 
             const svg = container.append("svg").attr("width", width).attr("height", height);
-            
+
+            // Legend rendered inside SVG, below x-axis in the bottom margin area
+            const legendY = height - 18;
+            const legendGroup = svg.append("g").attr("transform", `translate(${margin.left}, ${legendY})`);
+            legendGroup.append("rect").attr("width", 12).attr("height", 12).attr("rx", 2).attr("fill", "#ff9f43");
+            legendGroup.append("text").attr("x", 16).attr("y", 10).attr("font-size", "12px").attr("fill", "#777").text("Active Prep");
+            legendGroup.append("rect").attr("x", 100).attr("width", 12).attr("height", 12).attr("rx", 2).attr("fill", "#54a0ff");
+            legendGroup.append("text").attr("x", 116).attr("y", 10).attr("font-size", "12px").attr("fill", "#777").text("Passive Cooking");
+            legendGroup.append("text").attr("x", width - margin.left - margin.right - 10).attr("y", 10).attr("font-size", "11px").attr("fill", "#aaa").attr("text-anchor", "end").text("Scroll inside chart to Zoom/Expand time");
+
             // Standard Multi-Row Y Scale
             const yScale = d3.scaleBand().domain(recipe.timeline.map(d => `Step ${d.step_number}`)).range([margin.top, height - margin.bottom]).padding(0.3);
             
