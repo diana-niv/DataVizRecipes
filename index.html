@@ -331,7 +331,10 @@
 
             <div class="card">
                 <h3 id="list-title">All Recipes</h3>
-                <input type="text" id="recipe-search" placeholder="Search recipes..." style="width: 100%; box-sizing: border-box; margin-bottom: 10px; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                <div style="position: relative; margin-bottom: 10px;">
+                    <input type="text" id="recipe-search" placeholder="Search recipes or ingredients..." style="width: 100%; box-sizing: border-box; padding: 8px; padding-right: 130px; border: 1px solid #ddd; border-radius: 4px;">
+                    <span id="network-sync-badge" style="display:none; position:absolute; right:8px; top:50%; transform:translateY(-50%); font-size:11px; background:#3498db; color:white; border-radius:10px; padding:2px 8px; pointer-events:none;">from network ⬡</span>
+                </div>
                 <p>Select a recipe to see its timeline and ingredients.</p>
                 <div id="recipe-list-container">
                     <p style="padding:10px">Loading data...</p>
@@ -419,18 +422,25 @@
 
             // Recipe Search Listener
             d3.select("#recipe-search").on("input", function() {
-                const term = this.value.toLowerCase();
-                const filtered = allRecipes.filter(d => 
-                    (selectedCategory ? d.subcategory === selectedCategory : true) &&
-                    d.title.toLowerCase().includes(term)
-                );
-                updateList(filtered, selectedCategory ? selectedCategory : "All Recipes");
+                // Clear the network-synced styling when user types manually
+                this.style.borderColor = "#ddd";
+                document.getElementById("network-sync-badge").style.display = "none";
+                filterRecipesByIngredient(this.value);
             });
 
         }).catch(err => {
             console.error(err);
             document.body.innerHTML = `<h2 style="color:red; padding:20px">Error: ${err.message}<br>Is your Python server running?</h2>`;
         });
+
+        function filterRecipesByIngredient(term) {
+            const lower = term.toLowerCase();
+            const filtered = allRecipes.filter(d =>
+                (selectedCategory ? d.subcategory === selectedCategory : true) &&
+                (lower === "" || d.ingredients.some(ing => ing.toLowerCase().includes(lower)) || d.title.toLowerCase().includes(lower))
+            );
+            updateList(filtered, selectedCategory ? selectedCategory : "All Recipes");
+        }
 
         // ==========================================
         // 1. NETWORK GRAPH (WITH TOGGLE SUPPORT)
@@ -509,6 +519,13 @@
                 node.filter(n => neighborIds.has(n.id)).style("opacity", 1).style("pointer-events", "auto");
                 connectedLinks.style("stroke-opacity", 1).style("stroke", "#d62728").style("pointer-events", "auto").raise();
 
+                // Sync to View 2 recipe search
+                const recipeSearch = document.getElementById("recipe-search");
+                recipeSearch.value = selectedNode.id;
+                recipeSearch.style.borderColor = "#3498db";
+                document.getElementById("network-sync-badge").style.display = "inline";
+                filterRecipesByIngredient(selectedNode.id);
+
                 if (panToCenter) {
                     centerOnNode(selectedNode);
                 }
@@ -553,7 +570,14 @@
             function resetView() {
                 currentFocusNode = null; 
                 node.style("opacity", 1).style("pointer-events", "auto");
-                link.style("stroke", "#555").style("stroke-opacity", d => opacityScale(d.value)).style("pointer-events", "auto"); 
+                link.style("stroke", "#555").style("stroke-opacity", d => opacityScale(d.value)).style("pointer-events", "auto");
+
+                // Clear View 2 recipe search
+                const recipeSearch = document.getElementById("recipe-search");
+                recipeSearch.value = "";
+                recipeSearch.style.borderColor = "#ddd";
+                document.getElementById("network-sync-badge").style.display = "none";
+                filterRecipesByIngredient("");
             }
 
             // Network Search Dropdown
